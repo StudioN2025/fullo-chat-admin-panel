@@ -62,9 +62,28 @@ const adminDashboard = (function() {
             let online = 0;
             let banned = 0;
             
+            const now = Date.now();
+            
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
-                if (data.online) online++;
+                
+                // Проверяем онлайн статус (последняя активность менее 15 секунд назад)
+                if (data.online === true) {
+                    // Дополнительно проверяем lastSeen
+                    if (data.lastSeen) {
+                        const lastSeen = data.lastSeen.seconds ? 
+                            data.lastSeen.seconds * 1000 : 
+                            new Date(data.lastSeen).getTime();
+                        
+                        const diff = now - lastSeen;
+                        if (diff < 15000) { // 15 секунд
+                            online++;
+                        }
+                    } else {
+                        online++;
+                    }
+                }
+                
                 if (data.banned) banned++;
             });
             
@@ -135,9 +154,27 @@ const adminDashboard = (function() {
                 let online = 0;
                 let banned = 0;
                 
+                const now = Date.now();
+                
                 snapshot.docs.forEach(doc => {
                     const data = doc.data();
-                    if (data.online) online++;
+                    
+                    // Проверяем онлайн статус
+                    if (data.online === true) {
+                        if (data.lastSeen) {
+                            const lastSeen = data.lastSeen.seconds ? 
+                                data.lastSeen.seconds * 1000 : 
+                                new Date(data.lastSeen).getTime();
+                            
+                            const diff = now - lastSeen;
+                            if (diff < 15000) {
+                                online++;
+                            }
+                        } else {
+                            online++;
+                        }
+                    }
+                    
                     if (data.banned) banned++;
                 });
                 
@@ -206,13 +243,29 @@ const adminDashboard = (function() {
             return;
         }
         
+        const now = Date.now();
         let html = '';
         
         users.forEach(doc => {
             const user = doc.data();
             const isBanned = user.banned || false;
             const banExpiry = user.banExpiry ? new Date(user.banExpiry.seconds * 1000) : null;
-            const isOnline = user.online || false;
+            
+            // Проверяем онлайн статус
+            let isOnline = false;
+            if (user.online === true) {
+                if (user.lastSeen) {
+                    const lastSeen = user.lastSeen.seconds ? 
+                        user.lastSeen.seconds * 1000 : 
+                        new Date(user.lastSeen).getTime();
+                    
+                    const diff = now - lastSeen;
+                    isOnline = diff < 15000; // 15 секунд
+                } else {
+                    isOnline = true;
+                }
+            }
+            
             const roomId = user.currentRoom || '—';
             
             // Check if ban expired
@@ -220,6 +273,24 @@ const adminDashboard = (function() {
             const effectiveBanned = isBanned && !banExpired;
             
             const rowClass = effectiveBanned ? 'banned' : '';
+            
+            // Форматируем время последней активности
+            let lastSeenText = '—';
+            if (user.lastSeen) {
+                const lastSeen = user.lastSeen.seconds ? 
+                    new Date(user.lastSeen.seconds * 1000) : 
+                    new Date(user.lastSeen);
+                lastSeenText = lastSeen.toLocaleString();
+            }
+            
+            // Форматируем время регистрации
+            let createdAtText = '—';
+            if (user.createdAt) {
+                const createdAt = user.createdAt.seconds ? 
+                    new Date(user.createdAt.seconds * 1000) : 
+                    new Date(user.createdAt);
+                createdAtText = createdAt.toLocaleDateString();
+            }
             
             html += `
                 <tr class="${rowClass}" data-user-id="${doc.id}">
@@ -235,9 +306,9 @@ const adminDashboard = (function() {
                         ${effectiveBanned ? '<span class="status-badge status-banned">🔨 Бан</span>' : ''}
                         ${banExpiry && !banExpired ? `<br><small>до ${banExpiry.toLocaleString()}</small>` : ''}
                     </td>
-                    <td>${formatTimestamp(user.lastSeen)}</td>
+                    <td>${lastSeenText}</td>
                     <td>${roomId}</td>
-                    <td>${formatTimestamp(user.createdAt)}</td>
+                    <td>${createdAtText}</td>
                     <td class="action-buttons">
                         ${renderBanButtons(doc.id, effectiveBanned, banExpiry)}
                     </td>
@@ -263,13 +334,31 @@ const adminDashboard = (function() {
             const room = doc.data();
             const participantCount = room.participants ? room.participants.length : 0;
             
+            // Форматируем время создания
+            let createdAtText = '—';
+            if (room.createdAt) {
+                const createdAt = room.createdAt.seconds ? 
+                    new Date(room.createdAt.seconds * 1000) : 
+                    new Date(room.createdAt);
+                createdAtText = createdAt.toLocaleString();
+            }
+            
+            // Форматируем время последней активности
+            let lastActiveText = '—';
+            if (room.lastActive) {
+                const lastActive = room.lastActive.seconds ? 
+                    new Date(room.lastActive.seconds * 1000) : 
+                    new Date(room.lastActive);
+                lastActiveText = lastActive.toLocaleString();
+            }
+            
             html += `
                 <tr data-room-id="${doc.id}">
                     <td><strong>${room.code || '—'}</strong></td>
                     <td>${room.hostName || '—'}</td>
                     <td>${participantCount}</td>
-                    <td>${formatTimestamp(room.createdAt)}</td>
-                    <td>${formatTimestamp(room.lastActive)}</td>
+                    <td>${createdAtText}</td>
+                    <td>${lastActiveText}</td>
                     <td>
                         <button class="action-btn delete-room-btn" onclick="adminDashboard.deleteRoom('${doc.id}')">
                             🗑️ Удалить
@@ -291,60 +380,41 @@ const adminDashboard = (function() {
             return;
         }
         
-        let html = '';
-        const isSuperAdmin = currentUser ? isUserSuperAdmin(currentUser.uid) : false;
-        
-        admins.forEach(async (doc) => {
-            const admin = doc.data();
-            
-            // Get adder info
-            let addedByName = '—';
-            if (admin.addedBy) {
-                const adderDoc = await db.collection('admins').doc(admin.addedBy).get();
-                if (adderDoc.exists) {
-                    addedByName = adderDoc.data().email;
-                }
-            }
-            
-            html += `
-                <tr data-admin-id="${doc.id}">
-                    <td>${admin.email || '—'}</td>
-                    <td>${formatTimestamp(admin.addedAt)}</td>
-                    <td>${addedByName}</td>
-                    <td>
-                        ${admin.superAdmin ? 
-                            '<span class="status-badge status-online">Да 👑</span>' : 
-                            '<span class="status-badge status-offline">Нет</span>'}
-                    </td>
-                    <td>
-                        ${(isSuperAdmin || doc.id === currentUser?.uid) && !admin.superAdmin ? 
-                            `<button class="action-btn remove-admin-btn" onclick="adminDashboard.removeAdmin('${doc.id}')">
-                                🗑️ Удалить
-                            </button>` : 
-                            '—'}
-                    </td>
-                </tr>
-            `;
-        });
-        
-        // Use Promise.all to handle async operations
+        // Используем Promise.all для асинхронной загрузки
         Promise.all(admins.map(async (doc) => {
             const admin = doc.data();
             let addedByName = '—';
+            
             if (admin.addedBy) {
-                const adderDoc = await db.collection('admins').doc(admin.addedBy).get();
-                if (adderDoc.exists) {
-                    addedByName = adderDoc.data().email;
+                try {
+                    const adderDoc = await db.collection('admins').doc(admin.addedBy).get();
+                    if (adderDoc.exists) {
+                        addedByName = adderDoc.data().email;
+                    }
+                } catch (error) {
+                    console.error('Error getting adder info:', error);
                 }
             }
-            return { doc, admin, addedByName };
+            
+            // Форматируем время добавления
+            let addedAtText = '—';
+            if (admin.addedAt) {
+                const addedAt = admin.addedAt.seconds ? 
+                    new Date(admin.addedAt.seconds * 1000) : 
+                    new Date(admin.addedAt);
+                addedAtText = addedAt.toLocaleString();
+            }
+            
+            return { doc, admin, addedByName, addedAtText };
         })).then(results => {
-            let finalHtml = '';
-            results.forEach(({ doc, admin, addedByName }) => {
-                finalHtml += `
+            let html = '';
+            const isSuperAdmin = currentUser ? isUserSuperAdmin(currentUser.uid) : false;
+            
+            results.forEach(({ doc, admin, addedByName, addedAtText }) => {
+                html += `
                     <tr data-admin-id="${doc.id}">
                         <td>${admin.email || '—'}</td>
-                        <td>${formatTimestamp(admin.addedAt)}</td>
+                        <td>${addedAtText}</td>
                         <td>${addedByName}</td>
                         <td>
                             ${admin.superAdmin ? 
@@ -361,7 +431,11 @@ const adminDashboard = (function() {
                     </tr>
                 `;
             });
-            adminsTableBody.innerHTML = finalHtml || '<tr><td colspan="5" class="loading-row">Нет администраторов</td></tr>';
+            
+            adminsTableBody.innerHTML = html;
+        }).catch(error => {
+            console.error('Error rendering admins table:', error);
+            adminsTableBody.innerHTML = '<tr><td colspan="5" class="loading-row">Ошибка загрузки</td></tr>';
         });
     }
 
@@ -379,18 +453,55 @@ const adminDashboard = (function() {
         logs.forEach(doc => {
             const log = doc.data();
             
+            // Форматируем время
+            let timestampText = '—';
+            if (log.timestamp) {
+                const timestamp = log.timestamp.seconds ? 
+                    new Date(log.timestamp.seconds * 1000) : 
+                    new Date(log.timestamp);
+                timestampText = timestamp.toLocaleString();
+            }
+            
+            // Форматируем действие
+            const actionText = formatAction(log.action);
+            
+            // Форматируем детали
+            let detailsText = '—';
+            if (log.details) {
+                detailsText = JSON.stringify(log.details).substring(0, 50);
+                if (detailsText.length > 50) detailsText += '...';
+            }
+            
             html += `
                 <tr>
-                    <td>${formatTimestamp(log.timestamp)}</td>
-                    <td>${log.details?.email || log.adminId || '—'}</td>
-                    <td>${log.action || '—'}</td>
-                    <td>${log.targetId || '—'}</td>
+                    <td>${timestampText}</td>
+                    <td>${log.adminEmail || log.adminId || '—'}</td>
+                    <td>${actionText}</td>
+                    <td>${log.targetEmail || log.targetId || '—'}</td>
                     <td>${log.ip || '—'}</td>
                 </tr>
             `;
         });
         
         logsTableBody.innerHTML = html;
+    }
+
+    // Format action
+    function formatAction(action) {
+        const actions = {
+            'login': '🔐 Вход',
+            'logout': '🚪 Выход',
+            'login_failed': '❌ Ошибка входа',
+            'ban_permanent': '🔨 Постоянный бан',
+            'ban_temporary': '⏳ Временный бан',
+            'unban': '🔓 Разбан',
+            'kick_user': '👢 Кик',
+            'delete_room': '🗑️ Удаление комнаты',
+            'add_admin': '➕ Добавление админа',
+            'remove_admin': '➖ Удаление админа',
+            'dashboard_access': '📊 Доступ к панели'
+        };
+        return actions[action] || action;
     }
 
     // Render ban buttons
@@ -411,18 +522,6 @@ const adminDashboard = (function() {
                 </button>
             `;
         }
-    }
-
-    // Format timestamp
-    function formatTimestamp(timestamp) {
-        if (!timestamp) return '—';
-        if (timestamp.seconds) {
-            return new Date(timestamp.seconds * 1000).toLocaleString();
-        }
-        if (timestamp instanceof Date) {
-            return timestamp.toLocaleString();
-        }
-        return '—';
     }
 
     // Filter users by search
@@ -558,6 +657,12 @@ const adminDashboard = (function() {
                 );
             });
             
+            // Also update user document
+            batch.update(db.collection('users').doc(userId), {
+                online: false,
+                currentRoom: null
+            });
+            
             await batch.commit();
         } catch (error) {
             console.error('Error kicking user:', error);
@@ -572,6 +677,18 @@ const adminDashboard = (function() {
             const roomDoc = await db.collection('rooms').doc(roomId).get();
             const roomData = roomDoc.data();
             
+            // Get all participants to update their status
+            const participantsSnapshot = await roomDoc.ref.collection('participants').get();
+            const batch = db.batch();
+            
+            // Update each participant's user document
+            participantsSnapshot.docs.forEach(participantDoc => {
+                batch.update(db.collection('users').doc(participantDoc.id), {
+                    online: false,
+                    currentRoom: null
+                });
+            });
+            
             // Delete subcollections
             await deleteCollection(roomDoc.ref.collection('participants'), 50);
             await deleteCollection(roomDoc.ref.collection('messages'), 50);
@@ -579,7 +696,9 @@ const adminDashboard = (function() {
             await deleteCollection(roomDoc.ref.collection('iceCandidates'), 50);
             
             // Delete the room
-            await db.collection('rooms').doc(roomId).delete();
+            batch.delete(db.collection('rooms').doc(roomId));
+            
+            await batch.commit();
             
             // Log action
             await adminAuth.logAdminAction(currentUser.uid, 'delete_room', { 
