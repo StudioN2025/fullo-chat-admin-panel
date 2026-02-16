@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FulloChat Admin Panel</title>
+    <link rel="stylesheet" href="css/admin.css">
+    <!-- Chart.js для графиков -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="admin-container">
+        <!-- Авторизация -->
+        <div id="authContainer" class="auth-container">
+            <div class="admin-logo">
+                <h1>👑 FulloChat Admin</h1>
+                <p>Панель управления</p>
+            </div>
+            
+            <div id="errorMessage" class="error-message"></div>
+            <div id="successMessage" class="success-message"></div>
+            
+            <div class="input-group">
+                <input type="email" id="emailInput" placeholder="Email администратора">
+            </div>
+            <div class="input-group">
+                <input type="password" id="passwordInput" placeholder="Пароль">
+            </div>
+            
+            <button onclick="adminAuth.login()">Войти</button>
+            
+            <div class="info-text">
+                <p>Только для администраторов</p>
+            </div>
+        </div>
+
+        <!-- Админ-панель -->
+        <div id="adminPanel" class="admin-panel hidden">
+            <div class="admin-header">
+                <div class="header-left">
+                    <h2>👑 FulloChat Admin</h2>
+                    <span class="admin-badge">Администратор</span>
+                </div>
+                <div class="header-right">
+                    <span id="adminEmail"></span>
+                    <button onclick="adminAuth.logout()" class="logout-btn">Выйти</button>
+                </div>
+            </div>
+
+            <!-- Статистика в реальном времени -->
+            <div class="stats-grid" id="liveStats">
+                <div class="stat-card">
+                    <div class="stat-icon">👥</div>
+                    <div class="stat-info">
+                        <span class="stat-label">Всего аккаунтов</span>
+                        <span class="stat-value" id="totalUsers">0</span>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">🟢</div>
+                    <div class="stat-info">
+                        <span class="stat-label">Сейчас онлайн</span>
+                        <span class="stat-value" id="onlineNow">0</span>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">🏠</div>
+                    <div class="stat-info">
+                        <span class="stat-label">Активных комнат</span>
+                        <span class="stat-value" id="activeRooms">0</span>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-info">
+                        <span class="stat-label">Трафик (24ч)</span>
+                        <span class="stat-value" id="traffic24h">0 MB</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Графики активности -->
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h3>Активность за 24 часа</h3>
+                    <canvas id="activityChart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Комнаты онлайн</h3>
+                    <canvas id="roomsChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Список всех пользователей -->
+            <div class="users-section">
+                <div class="section-header">
+                    <h3>👥 Все пользователи FulloChat</h3>
+                    <div class="search-box">
+                        <input type="text" id="searchUser" placeholder="🔍 Поиск по email или имени...">
+                    </div>
+                </div>
+                
+                <div class="table-container">
+                    <table id="usersTable">
+                        <thead>
+                            <tr>
+                                <th>Пользователь</th>
+                                <th>Email</th>
+                                <th>Статус</th>
+                                <th>В сети</th>
+                                <th>Комната</th>
+                                <th>Регистрация</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <!-- Данные будут загружаться сюда -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Список активных комнат -->
+            <div class="rooms-section">
+                <div class="section-header">
+                    <h3>🏠 Активные комнаты</h3>
+                </div>
+                
+                <div class="table-container">
+                    <table id="roomsTable">
+                        <thead>
+                            <tr>
+                                <th>Код комнаты</th>
+                                <th>Создатель</th>
+                                <th>Участников</th>
+                                <th>Создана</th>
+                                <th>Последняя активность</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="roomsTableBody">
+                            <!-- Данные будут загружаться сюда -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Логи трафика -->
+            <div class="traffic-section">
+                <div class="section-header">
+                    <h3>📊 Логи трафика</h3>
+                    <div class="traffic-controls">
+                        <button onclick="adminDashboard.refreshTraffic()" class="refresh-btn">🔄 Обновить</button>
+                    </div>
+                </div>
+                
+                <div class="traffic-stats">
+                    <div class="traffic-stat">
+                        <span class="traffic-label">За сегодня:</span>
+                        <span class="traffic-value" id="trafficToday">0 MB</span>
+                    </div>
+                    <div class="traffic-stat">
+                        <span class="traffic-label">За неделю:</span>
+                        <span class="traffic-value" id="trafficWeek">0 MB</span>
+                    </div>
+                    <div class="traffic-stat">
+                        <span class="traffic-label">За месяц:</span>
+                        <span class="traffic-value" id="trafficMonth">0 MB</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <!-- Наши скрипты -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/admin-auth.js"></script>
+    <script src="js/admin-dashboard.js"></script>
+</body>
+</html>
