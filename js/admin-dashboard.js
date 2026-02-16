@@ -2,155 +2,125 @@
 const adminDashboard = (function() {
     let activityChart = null;
     let roomsChart = null;
-    let trafficChart = null;
     let usersListener = null;
     let roomsListener = null;
-    let trafficInterval = null;
+    let adminsListener = null;
+    let logsListener = null;
     
     // Статистика
     let totalUsers = 0;
     let onlineUsers = 0;
     let activeRooms = 0;
     let bannedUsers = 0;
-    let trafficData = {
-        today: 0,
-        week: 0,
-        month: 0,
-        history: []
-    };
+    let currentUser = null;
 
     // DOM Elements
     const totalUsersEl = document.getElementById('totalUsers');
     const onlineNowEl = document.getElementById('onlineNow');
     const activeRoomsEl = document.getElementById('activeRooms');
     const bannedUsersEl = document.getElementById('bannedUsers');
-    const traffic24hEl = document.getElementById('traffic24h');
-    const trafficTodayEl = document.getElementById('trafficToday');
-    const trafficWeekEl = document.getElementById('trafficWeek');
-    const trafficMonthEl = document.getElementById('trafficMonth');
     const usersTableBody = document.getElementById('usersTableBody');
     const roomsTableBody = document.getElementById('roomsTableBody');
+    const adminsTableBody = document.getElementById('adminsTableBody');
+    const logsTableBody = document.getElementById('logsTableBody');
     const searchInput = document.getElementById('searchUser');
 
     // Initialize dashboard
     async function init() {
+        currentUser = firebase.auth().currentUser;
+        
         // Load initial data
         await loadUsers();
         await loadRooms();
-        await loadTrafficData();
-        await loadBannedUsers();
+        await loadAdmins();
+        await loadLogs();
         
         // Start real-time listeners
         startUsersListener();
         startRoomsListener();
-        startTrafficTracking();
+        startAdminsListener();
+        startLogsListener();
         
         // Setup search
-        searchInput.addEventListener('input', filterUsers);
+        if (searchInput) {
+            searchInput.addEventListener('input', filterUsers);
+        }
         
         // Log dashboard access
-        await logDashboardAccess();
+        await adminAuth.logAdminAction(currentUser.uid, 'dashboard_access', { 
+            email: currentUser.email 
+        });
     }
 
-    // Log dashboard access
-    async function logDashboardAccess() {
-        const user = firebase.auth().currentUser;
-        if (user) {
-            await db.collection('admin_logs').add({
-                adminId: user.uid,
-                action: 'dashboard_access',
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            });
-        }
-    }
-
-    // Load banned users count
-    async function loadBannedUsers() {
+    // Load users
+    async function loadUsers() {
         try {
-            const snapshot = await db.collection('users')
-                .where('banned', '==', true)
-                .get();
+            const snapshot = await db.collection('users').get();
+            totalUsers = snapshot.size;
+            totalUsersEl.textContent = totalUsers;
             
-            bannedUsers = snapshot.size;
-            if (bannedUsersEl) bannedUsersEl.textContent = bannedUsers;
-        } catch (error) {
-            console.error('Error loading banned users:', error);
-        }
-    }
-
-    // Load traffic data from Firestore
-    async function loadTrafficData() {
-        try {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+            let online = 0;
+            let banned = 0;
             
-            const weekAgo = new Date();
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            
-            const monthAgo = new Date();
-            monthAgo.setMonth(monthAgo.getMonth() - 1);
-            
-            // Get today's traffic
-            const todaySnapshot = await db.collection('traffic')
-                .where('date', '>=', firebase.firestore.Timestamp.fromDate(today))
-                .get();
-            
-            trafficData.today = todaySnapshot.docs.reduce((sum, doc) => 
-                sum + (doc.data().bytes || 0), 0);
-            
-            // Get week's traffic
-            const weekSnapshot = await db.collection('traffic')
-                .where('date', '>=', firebase.firestore.Timestamp.fromDate(weekAgo))
-                .get();
-            
-            trafficData.week = weekSnapshot.docs.reduce((sum, doc) => 
-                sum + (doc.data().bytes || 0), 0);
-            
-            // Get month's traffic
-            const monthSnapshot = await db.collection('traffic')
-                .where('date', '>=', firebase.firestore.Timestamp.fromDate(monthAgo))
-                .get();
-            
-            trafficData.month = monthSnapshot.docs.reduce((sum, doc) => 
-                sum + (doc.data().bytes || 0), 0);
-            
-            // Get history for chart
-            const historySnapshot = await db.collection('traffic')
-                .orderBy('date', 'desc')
-                .limit(24 * 7) // Last 7 days by hour
-                .get();
-            
-            trafficData.history = historySnapshot.docs.map(doc => ({
-                time: doc.data().date.toDate(),
-                bytes: doc.data().bytes || 0
-            })).reverse();
-            
-            updateTrafficUI();
-            updateTrafficChart();
-        } catch (error) {
-            console.error('Error loading traffic data:', error);
-            // Use mock data if real data not available
-            useMockTrafficData();
-        }
-    }
-
-    // Use mock traffic data (for development)
-    function useMockTrafficData() {
-        trafficData.today = Math.floor(Math.random() * 500) + 100;
-        trafficData.week = Math.floor(Math.random() * 3000) + 500;
-        trafficData.month = Math.floor(Math.random() * 10000) + 2000;
-        
-        trafficData.history = [];
-        for (let i = 0; i < 24; i++) {
-            trafficData.history.push({
-                time: new Date(Date.now() - i * 60 * 60 * 1000),
-                bytes: Math.floor(Math.random() * 50) + 10
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                if (data.online) online++;
+                if (data.banned) banned++;
             });
+            
+            onlineUsers = online;
+            onlineNowEl.textContent = online;
+            
+            bannedUsers = banned;
+            bannedUsersEl.textContent = banned;
+            
+            renderUsersTable(snapshot.docs);
+            updateActivityChart(snapshot.docs);
+        } catch (error) {
+            console.error('Error loading users:', error);
+            showNotification('Ошибка загрузки пользователей', 'error');
         }
-        trafficData.history.reverse();
-        
-        updateTrafficUI();
-        updateTrafficChart();
+    }
+
+    // Load rooms
+    async function loadRooms() {
+        try {
+            const snapshot = await db.collection('rooms')
+                .where('active', '==', true)
+                .get();
+            
+            activeRooms = snapshot.size;
+            activeRoomsEl.textContent = activeRooms;
+            
+            renderRoomsTable(snapshot.docs);
+            updateRoomsChart(snapshot.docs);
+        } catch (error) {
+            console.error('Error loading rooms:', error);
+        }
+    }
+
+    // Load admins
+    async function loadAdmins() {
+        try {
+            const snapshot = await db.collection('admins').get();
+            renderAdminsTable(snapshot.docs);
+        } catch (error) {
+            console.error('Error loading admins:', error);
+        }
+    }
+
+    // Load logs
+    async function loadLogs() {
+        try {
+            const snapshot = await db.collection('admin_logs')
+                .orderBy('timestamp', 'desc')
+                .limit(100)
+                .get();
+            
+            renderLogsTable(snapshot.docs);
+        } catch (error) {
+            console.error('Error loading logs:', error);
+        }
     }
 
     // Start real-time users listener
@@ -175,7 +145,7 @@ const adminDashboard = (function() {
                 onlineNowEl.textContent = online;
                 
                 bannedUsers = banned;
-                if (bannedUsersEl) bannedUsersEl.textContent = banned;
+                bannedUsersEl.textContent = banned;
                 
                 renderUsersTable(snapshot.docs);
                 updateActivityChart(snapshot.docs);
@@ -201,91 +171,41 @@ const adminDashboard = (function() {
             });
     }
 
-    // Start traffic tracking
-    function startTrafficTracking() {
-        if (trafficInterval) clearInterval(trafficInterval);
+    // Start real-time admins listener
+    function startAdminsListener() {
+        if (adminsListener) adminsListener();
         
-        trafficInterval = setInterval(() => {
-            updateTrafficData();
-        }, 60000); // Every minute
+        adminsListener = db.collection('admins')
+            .onSnapshot((snapshot) => {
+                renderAdminsTable(snapshot.docs);
+            }, (error) => {
+                console.error('Admins listener error:', error);
+            });
     }
 
-    // Update traffic data
-    async function updateTrafficData() {
-        // Log current traffic (this would come from WebRTC stats)
-        const currentTraffic = estimateCurrentTraffic();
+    // Start real-time logs listener
+    function startLogsListener() {
+        if (logsListener) logsListener();
         
-        const now = new Date();
-        now.setMinutes(0, 0, 0); // Round to hour
-        
-        try {
-            // Check if we already have an entry for this hour
-            const existingSnapshot = await db.collection('traffic')
-                .where('date', '==', firebase.firestore.Timestamp.fromDate(now))
-                .get();
-            
-            if (existingSnapshot.empty) {
-                // Create new entry
-                await db.collection('traffic').add({
-                    date: firebase.firestore.Timestamp.fromDate(now),
-                    bytes: currentTraffic,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            } else {
-                // Update existing entry
-                const doc = existingSnapshot.docs[0];
-                await doc.ref.update({
-                    bytes: firebase.firestore.FieldValue.increment(currentTraffic)
-                });
-            }
-        } catch (error) {
-            console.error('Error updating traffic data:', error);
-        }
-        
-        // Update local data
-        trafficData.today += currentTraffic;
-        trafficData.week += currentTraffic;
-        trafficData.month += currentTraffic;
-        
-        trafficData.history.push({
-            time: new Date(),
-            bytes: currentTraffic
-        });
-        
-        // Keep last 7 days
-        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        trafficData.history = trafficData.history.filter(item => 
-            item.time.getTime() > sevenDaysAgo
-        );
-        
-        updateTrafficUI();
-    }
-
-    // Estimate current traffic based on online users and rooms
-    function estimateCurrentTraffic() {
-        // Rough estimate: 100KB per minute per active user
-        return onlineUsers * 100 * 1024;
-    }
-
-    // Update traffic UI
-    function updateTrafficUI() {
-        if (trafficTodayEl) trafficTodayEl.textContent = formatBytes(trafficData.today);
-        if (trafficWeekEl) trafficWeekEl.textContent = formatBytes(trafficData.week);
-        if (trafficMonthEl) trafficMonthEl.textContent = formatBytes(trafficData.month);
-        if (traffic24hEl) traffic24hEl.textContent = formatBytes(trafficData.today);
-    }
-
-    // Format bytes to human readable
-    function formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        logsListener = db.collection('admin_logs')
+            .orderBy('timestamp', 'desc')
+            .limit(100)
+            .onSnapshot((snapshot) => {
+                renderLogsTable(snapshot.docs);
+            }, (error) => {
+                console.error('Logs listener error:', error);
+            });
     }
 
     // Render users table
     function renderUsersTable(users) {
+        if (!usersTableBody) return;
+        
+        if (users.length === 0) {
+            usersTableBody.innerHTML = '<tr><td colspan="7" class="loading-row">Нет пользователей</td></tr>';
+            return;
+        }
+        
         let html = '';
         
         users.forEach(doc => {
@@ -305,7 +225,7 @@ const adminDashboard = (function() {
                 <tr class="${rowClass}" data-user-id="${doc.id}">
                     <td>
                         <strong>${user.displayName || '—'}</strong>
-                        ${user.superAdmin ? '<span class="super-admin">👑</span>' : ''}
+                        ${user.superAdmin ? '<span class="super-admin" title="Супер-администратор">👑</span>' : ''}
                     </td>
                     <td>${doc.id}</td>
                     <td>
@@ -328,35 +248,15 @@ const adminDashboard = (function() {
         usersTableBody.innerHTML = html;
     }
 
-    // Format timestamp
-    function formatTimestamp(timestamp) {
-        if (!timestamp) return '—';
-        const date = timestamp.seconds ? new Date(timestamp.seconds * 1000) : new Date(timestamp);
-        return date.toLocaleString();
-    }
-
-    // Render ban buttons
-    function renderBanButtons(userId, isBanned, banExpiry) {
-        if (isBanned) {
-            return `
-                <button class="action-btn unban-btn" onclick="adminDashboard.unbanUser('${userId}')">
-                    🔓 Разбанить
-                </button>
-            `;
-        } else {
-            return `
-                <button class="action-btn ban-btn" onclick="adminDashboard.banUser('${userId}')">
-                    🔨 Забанить
-                </button>
-                <button class="action-btn temp-ban-btn" onclick="adminDashboard.tempBanUser('${userId}')">
-                    ⏳ На 1 час
-                </button>
-            `;
-        }
-    }
-
     // Render rooms table
     function renderRoomsTable(rooms) {
+        if (!roomsTableBody) return;
+        
+        if (rooms.length === 0) {
+            roomsTableBody.innerHTML = '<tr><td colspan="6" class="loading-row">Нет активных комнат</td></tr>';
+            return;
+        }
+        
         let html = '';
         
         rooms.forEach(doc => {
@@ -382,12 +282,157 @@ const adminDashboard = (function() {
         roomsTableBody.innerHTML = html;
     }
 
+    // Render admins table
+    function renderAdminsTable(admins) {
+        if (!adminsTableBody) return;
+        
+        if (admins.length === 0) {
+            adminsTableBody.innerHTML = '<tr><td colspan="5" class="loading-row">Нет администраторов</td></tr>';
+            return;
+        }
+        
+        let html = '';
+        const isSuperAdmin = currentUser ? isUserSuperAdmin(currentUser.uid) : false;
+        
+        admins.forEach(async (doc) => {
+            const admin = doc.data();
+            
+            // Get adder info
+            let addedByName = '—';
+            if (admin.addedBy) {
+                const adderDoc = await db.collection('admins').doc(admin.addedBy).get();
+                if (adderDoc.exists) {
+                    addedByName = adderDoc.data().email;
+                }
+            }
+            
+            html += `
+                <tr data-admin-id="${doc.id}">
+                    <td>${admin.email || '—'}</td>
+                    <td>${formatTimestamp(admin.addedAt)}</td>
+                    <td>${addedByName}</td>
+                    <td>
+                        ${admin.superAdmin ? 
+                            '<span class="status-badge status-online">Да 👑</span>' : 
+                            '<span class="status-badge status-offline">Нет</span>'}
+                    </td>
+                    <td>
+                        ${(isSuperAdmin || doc.id === currentUser?.uid) && !admin.superAdmin ? 
+                            `<button class="action-btn remove-admin-btn" onclick="adminDashboard.removeAdmin('${doc.id}')">
+                                🗑️ Удалить
+                            </button>` : 
+                            '—'}
+                    </td>
+                </tr>
+            `;
+        });
+        
+        // Use Promise.all to handle async operations
+        Promise.all(admins.map(async (doc) => {
+            const admin = doc.data();
+            let addedByName = '—';
+            if (admin.addedBy) {
+                const adderDoc = await db.collection('admins').doc(admin.addedBy).get();
+                if (adderDoc.exists) {
+                    addedByName = adderDoc.data().email;
+                }
+            }
+            return { doc, admin, addedByName };
+        })).then(results => {
+            let finalHtml = '';
+            results.forEach(({ doc, admin, addedByName }) => {
+                finalHtml += `
+                    <tr data-admin-id="${doc.id}">
+                        <td>${admin.email || '—'}</td>
+                        <td>${formatTimestamp(admin.addedAt)}</td>
+                        <td>${addedByName}</td>
+                        <td>
+                            ${admin.superAdmin ? 
+                                '<span class="status-badge status-online">Да 👑</span>' : 
+                                '<span class="status-badge status-offline">Нет</span>'}
+                        </td>
+                        <td>
+                            ${(isSuperAdmin || doc.id === currentUser?.uid) && !admin.superAdmin ? 
+                                `<button class="action-btn remove-admin-btn" onclick="adminDashboard.removeAdmin('${doc.id}')">
+                                    🗑️ Удалить
+                                </button>` : 
+                                '—'}
+                        </td>
+                    </tr>
+                `;
+            });
+            adminsTableBody.innerHTML = finalHtml || '<tr><td colspan="5" class="loading-row">Нет администраторов</td></tr>';
+        });
+    }
+
+    // Render logs table
+    function renderLogsTable(logs) {
+        if (!logsTableBody) return;
+        
+        if (logs.length === 0) {
+            logsTableBody.innerHTML = '<tr><td colspan="5" class="loading-row">Нет записей</td></tr>';
+            return;
+        }
+        
+        let html = '';
+        
+        logs.forEach(doc => {
+            const log = doc.data();
+            
+            html += `
+                <tr>
+                    <td>${formatTimestamp(log.timestamp)}</td>
+                    <td>${log.details?.email || log.adminId || '—'}</td>
+                    <td>${log.action || '—'}</td>
+                    <td>${log.targetId || '—'}</td>
+                    <td>${log.ip || '—'}</td>
+                </tr>
+            `;
+        });
+        
+        logsTableBody.innerHTML = html;
+    }
+
+    // Render ban buttons
+    function renderBanButtons(userId, isBanned, banExpiry) {
+        if (isBanned) {
+            return `
+                <button class="action-btn unban-btn" onclick="adminDashboard.unbanUser('${userId}')">
+                    🔓 Разбанить
+                </button>
+            `;
+        } else {
+            return `
+                <button class="action-btn ban-btn" onclick="adminDashboard.banUser('${userId}')">
+                    🔨 Забанить
+                </button>
+                <button class="action-btn temp-ban-btn" onclick="adminDashboard.tempBanUser('${userId}')">
+                    ⏳ На 1 час
+                </button>
+            `;
+        }
+    }
+
+    // Format timestamp
+    function formatTimestamp(timestamp) {
+        if (!timestamp) return '—';
+        if (timestamp.seconds) {
+            return new Date(timestamp.seconds * 1000).toLocaleString();
+        }
+        if (timestamp instanceof Date) {
+            return timestamp.toLocaleString();
+        }
+        return '—';
+    }
+
     // Filter users by search
     function filterUsers() {
         const searchTerm = searchInput.value.toLowerCase();
         const rows = usersTableBody.querySelectorAll('tr');
         
         rows.forEach(row => {
+            if (row.classList.contains('loading-row')) return;
+            
             const text = row.textContent.toLowerCase();
             if (text.includes(searchTerm)) {
                 row.style.display = '';
@@ -395,6 +440,17 @@ const adminDashboard = (function() {
                 row.style.display = 'none';
             }
         });
+    }
+
+    // Check if user is super admin
+    async function isUserSuperAdmin(uid) {
+        try {
+            const adminDoc = await db.collection('admins').doc(uid).get();
+            return adminDoc.exists && adminDoc.data().superAdmin === true;
+        } catch (error) {
+            console.error('Error checking super admin:', error);
+            return false;
+        }
     }
 
     // Ban user permanently
@@ -405,7 +461,7 @@ const adminDashboard = (function() {
             await db.collection('users').doc(userId).update({
                 banned: true,
                 bannedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                bannedBy: firebase.auth().currentUser?.uid,
+                bannedBy: currentUser?.uid,
                 banExpiry: null
             });
             
@@ -413,7 +469,10 @@ const adminDashboard = (function() {
             await kickUser(userId);
             
             // Log action
-            await logAdminAction('ban_permanent', userId);
+            await adminAuth.logAdminAction(currentUser.uid, 'ban_permanent', { 
+                targetId: userId,
+                email: currentUser.email
+            });
             
             showNotification('Пользователь забанен навсегда', 'success');
         } catch (error) {
@@ -433,7 +492,7 @@ const adminDashboard = (function() {
             await db.collection('users').doc(userId).update({
                 banned: true,
                 bannedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                bannedBy: firebase.auth().currentUser?.uid,
+                bannedBy: currentUser?.uid,
                 banExpiry: firebase.firestore.Timestamp.fromDate(expiry)
             });
             
@@ -441,7 +500,11 @@ const adminDashboard = (function() {
             await kickUser(userId);
             
             // Log action
-            await logAdminAction('ban_temporary', userId, { expires: expiry.toISOString() });
+            await adminAuth.logAdminAction(currentUser.uid, 'ban_temporary', { 
+                targetId: userId,
+                expires: expiry.toISOString(),
+                email: currentUser.email
+            });
             
             showNotification('Пользователь забанен на 1 час', 'success');
         } catch (error) {
@@ -463,7 +526,10 @@ const adminDashboard = (function() {
             });
             
             // Log action
-            await logAdminAction('unban', userId);
+            await adminAuth.logAdminAction(currentUser.uid, 'unban', { 
+                targetId: userId,
+                email: currentUser.email
+            });
             
             showNotification('Пользователь разбанен', 'success');
         } catch (error) {
@@ -474,27 +540,28 @@ const adminDashboard = (function() {
 
     // Kick user from all rooms
     async function kickUser(userId) {
-        // Find all rooms where user is participant
-        const roomsSnapshot = await db.collection('rooms')
-            .where('participants', 'array-contains', userId)
-            .get();
-        
-        const batch = db.batch();
-        
-        roomsSnapshot.docs.forEach(roomDoc => {
-            // Remove from participants array
-            batch.update(roomDoc.ref, {
-                participants: firebase.firestore.FieldValue.arrayRemove(userId)
+        try {
+            const roomsSnapshot = await db.collection('rooms')
+                .where('participants', 'array-contains', userId)
+                .get();
+            
+            const batch = db.batch();
+            
+            roomsSnapshot.docs.forEach(roomDoc => {
+                batch.update(roomDoc.ref, {
+                    participants: firebase.firestore.FieldValue.arrayRemove(userId)
+                });
+                
+                batch.update(
+                    roomDoc.ref.collection('participants').doc(userId),
+                    { online: false }
+                );
             });
             
-            // Mark as offline in participants subcollection
-            batch.update(
-                roomDoc.ref.collection('participants').doc(userId),
-                { online: false }
-            );
-        });
-        
-        await batch.commit();
+            await batch.commit();
+        } catch (error) {
+            console.error('Error kicking user:', error);
+        }
     }
 
     // Delete room
@@ -502,23 +569,24 @@ const adminDashboard = (function() {
         if (!confirm('Удалить комнату? Все участники будут отключены.')) return;
         
         try {
-            // Get room data for logging
             const roomDoc = await db.collection('rooms').doc(roomId).get();
             const roomData = roomDoc.data();
             
-            // Delete room and all subcollections
+            // Delete subcollections
             await deleteCollection(roomDoc.ref.collection('participants'), 50);
             await deleteCollection(roomDoc.ref.collection('messages'), 50);
             await deleteCollection(roomDoc.ref.collection('signaling'), 50);
             await deleteCollection(roomDoc.ref.collection('iceCandidates'), 50);
             
-            // Delete the room itself
+            // Delete the room
             await db.collection('rooms').doc(roomId).delete();
             
             // Log action
-            await logAdminAction('delete_room', roomId, { 
+            await adminAuth.logAdminAction(currentUser.uid, 'delete_room', { 
+                roomId: roomId,
                 code: roomData?.code,
-                host: roomData?.hostName
+                host: roomData?.hostName,
+                email: currentUser.email
             });
             
             showNotification('Комната удалена', 'success');
@@ -528,7 +596,7 @@ const adminDashboard = (function() {
         }
     }
 
-    // Helper to delete a collection in batches
+    // Helper to delete a collection
     async function deleteCollection(collectionRef, batchSize) {
         const snapshot = await collectionRef.limit(batchSize).get();
         
@@ -538,41 +606,106 @@ const adminDashboard = (function() {
         snapshot.docs.forEach(doc => batch.delete(doc.ref));
         await batch.commit();
         
-        // Recursively delete remaining documents
         if (snapshot.size === batchSize) {
             await deleteCollection(collectionRef, batchSize);
         }
     }
 
-    // Log admin action to Firestore
-    async function logAdminAction(action, targetId, details = {}) {
-        const user = firebase.auth().currentUser;
-        if (!user) return;
+    // Show add admin modal
+    function showAddAdminModal() {
+        document.getElementById('addAdminModal').classList.remove('hidden');
+        document.getElementById('newAdminEmail').value = '';
+        document.getElementById('superAdminCheckbox').checked = false;
+        document.getElementById('modalError').textContent = '';
+    }
+
+    // Hide add admin modal
+    function hideAddAdminModal() {
+        document.getElementById('addAdminModal').classList.add('hidden');
+    }
+
+    // Add new admin
+    async function addAdmin() {
+        const email = document.getElementById('newAdminEmail').value.trim();
+        const isSuperAdmin = document.getElementById('superAdminCheckbox').checked;
+        const modalError = document.getElementById('modalError');
+        
+        if (!email) {
+            modalError.textContent = 'Введите email';
+            return;
+        }
         
         try {
-            await db.collection('admin_logs').add({
-                adminId: user.uid,
-                adminEmail: user.email,
-                action: action,
-                targetId: targetId,
-                details: details,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                ip: await getClientIP()
+            // Find user by email
+            const usersSnapshot = await db.collection('users')
+                .where('email', '==', email)
+                .get();
+            
+            if (usersSnapshot.empty) {
+                modalError.textContent = 'Пользователь с таким email не найден';
+                return;
+            }
+            
+            const userDoc = usersSnapshot.docs[0];
+            
+            // Check if already admin
+            const existingAdmin = await db.collection('admins').doc(userDoc.id).get();
+            if (existingAdmin.exists) {
+                modalError.textContent = 'Пользователь уже является администратором';
+                return;
+            }
+            
+            // Add to admins collection
+            await db.collection('admins').doc(userDoc.id).set({
+                email: email,
+                addedBy: currentUser?.uid,
+                addedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                superAdmin: isSuperAdmin
             });
+            
+            // Log action
+            await adminAuth.logAdminAction(currentUser.uid, 'add_admin', { 
+                targetEmail: email,
+                superAdmin: isSuperAdmin,
+                email: currentUser.email
+            });
+            
+            hideAddAdminModal();
+            showNotification('Администратор добавлен', 'success');
         } catch (error) {
-            console.error('Error logging admin action:', error);
+            console.error('Error adding admin:', error);
+            modalError.textContent = 'Ошибка добавления администратора';
         }
     }
 
-    // Get client IP
-    async function getClientIP() {
+    // Remove admin
+    async function removeAdmin(adminId) {
+        if (!confirm('Удалить этого администратора?')) return;
+        
         try {
-            const response = await fetch('https://api.ipify.org?format=json');
-            const data = await response.json();
-            return data.ip;
-        } catch {
-            return 'unknown';
+            const adminDoc = await db.collection('admins').doc(adminId).get();
+            const adminData = adminDoc.data();
+            
+            await db.collection('admins').doc(adminId).delete();
+            
+            // Log action
+            await adminAuth.logAdminAction(currentUser.uid, 'remove_admin', { 
+                targetId: adminId,
+                targetEmail: adminData?.email,
+                email: currentUser.email
+            });
+            
+            showNotification('Администратор удален', 'success');
+        } catch (error) {
+            console.error('Error removing admin:', error);
+            showNotification('Ошибка удаления администратора', 'error');
         }
+    }
+
+    // Refresh logs
+    async function refreshLogs() {
+        await loadLogs();
+        showNotification('Логи обновлены', 'success');
     }
 
     // Update activity chart
@@ -688,69 +821,6 @@ const adminDashboard = (function() {
         });
     }
 
-    // Update traffic chart
-    function updateTrafficChart() {
-        const ctx = document.getElementById('trafficChart')?.getContext('2d');
-        if (!ctx) return;
-        
-        if (trafficChart) {
-            trafficChart.destroy();
-        }
-        
-        const labels = trafficData.history.map(item => 
-            item.time.toLocaleTimeString()
-        );
-        const data = trafficData.history.map(item => 
-            Math.round(item.bytes / 1024) // Convert to KB
-        );
-        
-        trafficChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Трафик (KB)',
-                    data: data,
-                    backgroundColor: 'rgba(72, 187, 120, 0.6)',
-                    borderColor: '#48bb78',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            display: true,
-                            color: 'rgba(0,0,0,0.05)'
-                        }
-                    },
-                    x: {
-                        grid: {
-                            display: false
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Refresh all data
-    async function refreshAll() {
-        await loadUsers();
-        await loadRooms();
-        await loadTrafficData();
-        await loadBannedUsers();
-        showNotification('Данные обновлены', 'success');
-    }
-
     // Show notification
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');
@@ -771,7 +841,11 @@ const adminDashboard = (function() {
         tempBanUser,
         unbanUser,
         deleteRoom,
-        refreshAll
+        showAddAdminModal,
+        hideAddAdminModal,
+        addAdmin,
+        removeAdmin,
+        refreshLogs
     };
 })();
 
