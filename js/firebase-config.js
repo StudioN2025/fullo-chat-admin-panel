@@ -1,4 +1,4 @@
-// Firebase configuration
+// Firebase configuration - используйте свои данные из консоли Firebase
 const firebaseConfig = {
     apiKey: "AIzaSyDnFP2OVLCn37ZGiWvACP0Bs-B8GsezaaM",
     authDomain: "fullochat-9bede.firebaseapp.com",
@@ -15,7 +15,7 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Enable offline persistence for better performance
+// Enable offline persistence
 db.enablePersistence({ synchronizeTabs: true })
     .then(() => {
         console.log('Firestore persistence enabled');
