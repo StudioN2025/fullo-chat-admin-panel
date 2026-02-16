@@ -1,4 +1,4 @@
-// Firebase configuration - используйте свои данные из консоли Firebase
+// Firebase configuration
 const firebaseConfig = {
     apiKey: "AIzaSyDnFP2OVLCn37ZGiWvACP0Bs-B8GsezaaM",
     authDomain: "fullochat-9bede.firebaseapp.com",
@@ -15,18 +15,11 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Enable offline persistence
-db.enablePersistence({ synchronizeTabs: true })
-    .then(() => {
-        console.log('Firestore persistence enabled');
-    })
-    .catch((err) => {
-        if (err.code == 'failed-precondition') {
-            console.warn('Multiple tabs open, persistence enabled in one tab only');
-        } else if (err.code == 'unimplemented') {
-            console.warn('Browser doesn\'t support persistence');
-        }
-    });
+// Временно отключаем persistence для отладки
+// db.enablePersistence({ synchronizeTabs: true })
+//     .catch((err) => {
+//         console.warn('Persistence error:', err);
+//     });
 
 // Make globally available
 window.auth = auth;
