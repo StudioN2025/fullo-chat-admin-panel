@@ -19,7 +19,7 @@ const adminAuth = (function() {
                 await adminDashboard.init();
                 
                 // Log admin login
-                await logAdminAction(user.uid, 'login');
+                await logAdminAction(user.uid, 'login', { email: user.email });
             } else {
                 // Not admin - logout and show error
                 await firebase.auth().signOut();
@@ -58,7 +58,7 @@ const adminAuth = (function() {
         }
     }
 
-    // Get client IP (using ipify.org)
+    // Get client IP
     async function getClientIP() {
         try {
             const response = await fetch('https://api.ipify.org?format=json');
@@ -137,7 +137,7 @@ const adminAuth = (function() {
         try {
             const user = firebase.auth().currentUser;
             if (user) {
-                await logAdminAction(user.uid, 'logout');
+                await logAdminAction(user.uid, 'logout', { email: user.email });
             }
             await firebase.auth().signOut();
             showSuccess('Выход выполнен');
@@ -146,52 +146,12 @@ const adminAuth = (function() {
         }
     }
 
-    // Add new admin (only for existing admins)
-    async function addAdmin(email) {
-        try {
-            // Find user by email
-            const userSnapshot = await db.collection('users')
-                .where('email', '==', email)
-                .get();
-            
-            if (userSnapshot.empty) {
-                showError('Пользователь не найден');
-                return;
-            }
-            
-            const userDoc = userSnapshot.docs[0];
-            
-            // Add to admins collection
-            await db.collection('admins').doc(userDoc.id).set({
-                email: email,
-                addedBy: firebase.auth().currentUser?.uid,
-                addedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                superAdmin: false
-            });
-            
-            showSuccess('Администратор добавлен');
-        } catch (error) {
-            console.error('Error adding admin:', error);
-            showError('Ошибка добавления администратора');
-        }
-    }
-
-    // Remove admin
-    async function removeAdmin(uid) {
-        try {
-            await db.collection('admins').doc(uid).delete();
-            showSuccess('Администратор удален');
-        } catch (error) {
-            console.error('Error removing admin:', error);
-            showError('Ошибка удаления администратора');
-        }
-    }
-
+    // Public API
     return {
         login,
         logout,
-        addAdmin,
-        removeAdmin
+        checkIfAdmin,
+        logAdminAction
     };
 })();
 
